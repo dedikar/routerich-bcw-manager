@@ -1,6 +1,6 @@
 cat > /root/blockcheckw-manager.sh <<'EOF'
 #!/bin/sh
-# BlockCheckW Manager v0.4.1
+# BlockCheckW Manager v0.4.2
 
 # Цвета
 if [ -t 1 ]; then
@@ -22,6 +22,29 @@ fi
 CFG="/root/.bcw.conf"
 SELF="/root/blockcheckw-manager.sh"
 LINK="/usr/bin/bcw"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ЗАФИКСИРОВАННАЯ ВЕРСИЯ blockcheckw
+#
+# Менеджер работает только с проверенной версией движка. В более новых версиях
+# автор меняет поведение так, что подбор перестаёт работать, поэтому вместо
+# "releases/latest" версия захардкожена.
+#
+# Почему v0.8.5:
+#   В v0.9.5 появился коммит "снос чужих таблиц и рулсетов" (FIXES #66),
+#   добавивший модуль firewall/nft.rs. Движок начинает удалять nft-таблицы и
+#   ruleset'ы, которые ему не принадлежат: scan может находить стратегии, но
+#   check не подтверждает ни одной.
+#
+#   Дополнительно: по v0.11.1 включительно движок ищет nfqws2 автоподбором по
+#   /opt/zapret2/binaries/<arch>/nfqws2 (этот симлинк создаёт менеджер), а с
+#   v0.11.2 путь жёстко зашит в /opt/zapret2/nfq2/nfqws2.
+#
+# Менять версию не рекомендуется. Если меняете — проверьте на роутере, что
+# `blockcheckw check` даёт рабочие стратегии, а не только что scan что-то нашёл.
+# ─────────────────────────────────────────────────────────────────────────────
+BCW_VERSION="v0.8.5"
+BCW_REPO="rcd27/blockcheckw"
 
 # Глобальная переменная для состояния zapret
 ZAPRET_WAS_RUNNING=0
@@ -68,18 +91,14 @@ printf "${CYAN}${BOLD}=========================================${NC}\n"
 printf "${CYAN}${BOLD}  Установка / обновление blockcheckw${NC}\n"
 printf "${CYAN}${BOLD}=========================================${NC}\n\n"
 
+printf "${CYAN}Версия (зафиксирована):${NC} ${GREEN}${BOLD}${BCW_VERSION}${NC}\n"
+printf "${CYAN}Проверена на RouteRich (aarch64), п.128 потоков.${NC}\n\n"
+
 cd /tmp || return
 
-printf "${YELLOW}→ Получение информации о последней версии...${NC}\n"
-URL="$(wget -qO- https://api.github.com/repos/rcd27/blockcheckw/releases/latest \
-| jq -r '.assets[] | select(.name | contains("linux-arm64.tar.gz")) | .browser_download_url')"
-
-if [ -z "$URL" ]; then
-    printf "${RED}${BOLD}Ошибка: не удалось получить ссылку для загрузки.${NC}\n"
-    pause
-    return
-fi
-printf "${GREEN}✓ Ссылка получена:${NC} ${URL##*/}\n\n"
+printf "${YELLOW}→ Формирование ссылки на версию ${BCW_VERSION}...${NC}\n"
+URL="https://github.com/${BCW_REPO}/releases/download/${BCW_VERSION}/blockcheckw-linux-arm64.tar.gz"
+printf "${GREEN}✓ Ссылка:${NC} ${URL##*/}\n\n"
 
 printf "${YELLOW}→ Подготовка временной директории...${NC}\n"
 rm -rf /tmp/bcwtmp
@@ -88,17 +107,16 @@ cd /tmp/bcwtmp || return
 printf "${GREEN}✓ Готово${NC}\n\n"
 
 printf "${YELLOW}→ Загрузка архива...${NC}\n"
-wget -O bcw.tar.gz "$URL" 2>&1
-if [ $? -ne 0 ]; then
+if ! wget -O bcw.tar.gz "$URL"; then
     printf "\n${RED}${BOLD}Ошибка загрузки.${NC}\n"
+    printf "${YELLOW}Проверьте интернет на роутере и что релиз ${BCW_VERSION} доступен.${NC}\n"
     pause
     return
 fi
 printf "${GREEN}✓ Загрузка завершена${NC}\n\n"
 
 printf "${YELLOW}→ Распаковка...${NC}\n"
-tar -xzf bcw.tar.gz
-if [ $? -ne 0 ]; then
+if ! tar -xzf bcw.tar.gz; then
     printf "${RED}${BOLD}Ошибка распаковки.${NC}\n"
     pause
     return
@@ -120,10 +138,16 @@ chmod +x /usr/bin/blockcheckw
 printf "${GREEN}✓ Установлено${NC}\n\n"
 
 printf "${YELLOW}→ Настройка окружения...${NC}\n"
+# Обязательно для этой версии: движок ищет nfqws2 в
+# /opt/zapret2/binaries/<arch>/nfqws2, а в zapret2 он лежит в nfq2/.
 mkdir -p /opt/zapret2/binaries/linux-arm64
 if [ -f /opt/zapret2/nfq2/nfqws2 ]; then
     ln -sf /opt/zapret2/nfq2/nfqws2 /opt/zapret2/binaries/linux-arm64/nfqws2
     printf "${GREEN}✓ Симлинк nfqws2 создан${NC}\n"
+else
+    printf "${RED}${BOLD}ВНИМАНИЕ: /opt/zapret2/nfq2/nfqws2 не найден!${NC}\n"
+    printf "${YELLOW}blockcheckw не сможет работать без nfqws2.${NC}\n"
+    printf "${YELLOW}Установите/переустановите zapret2 и повторите.${NC}\n\n"
 fi
 
 ln -sf "$SELF" "$LINK"
@@ -133,9 +157,25 @@ printf "${GREEN}${BOLD}=========================================${NC}\n"
 printf "${GREEN}${BOLD}  Установка завершена${NC}\n"
 printf "${GREEN}${BOLD}=========================================${NC}\n\n"
 
-VERSION="$($BIN --version 2>/dev/null | head -1)"
-if [ -n "$VERSION" ]; then
-    printf "${CYAN}Версия:${NC} ${GREEN}$VERSION${NC}\n"
+printf "${YELLOW}→ Проверка работоспособности...${NC}\n"
+VERSION="$(/usr/bin/blockcheckw --version 2>/dev/null </dev/null | head -1)"
+case "$VERSION" in
+    *"${BCW_VERSION}"*)
+        printf "${GREEN}✓${NC} ${VERSION}\n"
+        ;;
+    "")
+        printf "${RED}✗ Не удалось определить версию движка.${NC}\n"
+        ;;
+    *)
+        printf "${YELLOW}⚠ Установлена другая версия:${NC} ${VERSION}\n"
+        printf "${YELLOW}  Ожидалась ${BCW_VERSION} — менеджер может работать некорректно.${NC}\n"
+        ;;
+esac
+
+if [ -x /opt/zapret2/binaries/linux-arm64/nfqws2 ]; then
+    printf "${GREEN}✓${NC} nfqws2 доступен движку\n"
+else
+    printf "${RED}✗ nfqws2 недоступен — поиск не запустится.${NC}\n"
 fi
 
 printf "\n${CYAN}Команда запуска:${NC} ${BOLD}bcw${NC}\n"
@@ -756,8 +796,9 @@ while true
 do
 clear
 printf "${CYAN}${BOLD}==================================${NC}\n"
-printf "${CYAN}${BOLD} BlockCheckW Manager v0.4.1${NC}\n"
+printf "${CYAN}${BOLD} BlockCheckW Manager v0.4.2${NC}\n"
 printf "${CYAN}${BOLD}==================================${NC}\n"
+printf "${CYAN}Движок:${NC} ${GREEN}${BCW_VERSION}${NC} ${CYAN}(зафиксирован)${NC}\n"
 echo "1. Установить / обновить blockcheckw"
 echo "2. Удалить blockcheckw + настройки"
 echo "3. Быстрый поиск (только сканирование, один домен)"
