@@ -91,8 +91,7 @@ printf "${CYAN}${BOLD}=========================================${NC}\n"
 printf "${CYAN}${BOLD}  Установка / обновление blockcheckw${NC}\n"
 printf "${CYAN}${BOLD}=========================================${NC}\n\n"
 
-printf "${CYAN}Версия (зафиксирована):${NC} ${GREEN}${BOLD}${BCW_VERSION}${NC}\n"
-printf "${CYAN}Проверена на RouteRich (aarch64), п.128 потоков.${NC}\n\n"
+printf "${CYAN}Версия (зафиксирована):${NC} ${GREEN}${BOLD}${BCW_VERSION}${NC}\n\n"
 
 cd /tmp || return
 
